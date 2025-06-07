@@ -14,14 +14,16 @@ The fake status text and other config are hardcoded in src/global.h
 - make (optional)
 
 ## Build 
-''' 
+``` 
 git clone https://github.com/Ali-brarou/Minecraft-honeypot.git
 cd Minecraft-honeypot/src/
 make
-'''
+```
 
 ## Run 
+```
 ./minecraft-honey
+```
 
 ## References 
 https://minecraft.wiki/w/Java_Edition_protocol/
