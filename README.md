@@ -9,7 +9,7 @@ Instead, it's better to use a container or create new non-privileged user
 The fake status text and other config are hardcoded in src/global.h
 
 ## Requirements 
-- GCC (should work for clang)
+- GCC (should work with clang)
 - Unix-based system 
 - make (optional)
 
@@ -26,5 +26,5 @@ make
 ```
 
 ## References 
-https://minecraft.wiki/w/Java_Edition_protocol/
-https://minecraft.wiki/w/Java_Edition_protocol/Server_List_Ping
+- https://minecraft.wiki/w/Java_Edition_protocol/
+- https://minecraft.wiki/w/Java_Edition_protocol/Server_List_Ping
