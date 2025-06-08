@@ -46,7 +46,7 @@ FAIL:
 static void disconnect_client(Client_t* client, char* msg)
 {
     printf("%s Disconnected: %s\n", client->ip, msg); 
-    logger_handle_event(LOG_DISCONNECT, client->ip); 
+    logger_handle_event(LOG_DISCONNECT, client->ip, msg); 
     if (client->fd >= 0)
     {
         close(client->fd); 
@@ -96,6 +96,19 @@ static void recv_n_bytes(Client_t* client, void* buff, ssize_t len)
     }
 }
 
+/* returns size prefix of packet */ 
+static uint32_t recv_packet(Client_t* client, void* buff, ssize_t len)
+{
+    uint32_t size_prefix = recv_size_prefix(client); 
+    if (size_prefix >= len || size_prefix == 0)
+    {
+        disconnect_client(client, "invalid size prefix"); 
+    }
+        
+    recv_n_bytes(client, buff, size_prefix); 
+    return size_prefix; 
+}
+
 static void send_byte(Client_t* client, uint8_t val)
 {
     send(client->fd, &val, 1, 0); 
@@ -119,9 +132,10 @@ static void send_varint(Client_t* client, uint32_t val)
         val >>= 7; 
     }
 }
+#define send_size_prefix send_varint
 
-/* returns how many bytes are written into the buffer */
-static size_t pack_varint(uint8_t* target, size_t len, uint32_t val)
+/* returns how many bytes are written into the buffer or -1 if it can't */
+static ssize_t pack_varint(uint8_t* target, size_t len, uint32_t val)
 {
     size_t i = 0; 
     for (;i < len; i++)
@@ -135,12 +149,36 @@ static size_t pack_varint(uint8_t* target, size_t len, uint32_t val)
         target[i] = ((uint8_t)val & SEGMENT_BITS) | CONTINUE_BIT; 
         val >>= 7; 
     }
-    return i; 
+    return -1; 
+}
+
+/* returns how many bytes are used for the varint or -1 if it can't parse */ 
+static ssize_t parse_varint(uint8_t* buff, size_t len, uint32_t* target_val)
+{
+    size_t i = 0; 
+    int position = 0; 
+    uint32_t result = 0; 
+    *target_val = 0; 
+    for (;i < len; i++)
+    {
+        result |= (buff[i] & SEGMENT_BITS) << position; 
+        if ((buff[i] & CONTINUE_BIT) == 0)
+        {
+            *target_val = result;  
+            return ++i; 
+        }
+        position += 7; 
+        if (position >= 32)
+        {
+            return -1; 
+        }
+    }
+    return -1; 
 }
 
 static void parse_handshake(uint8_t* buff, size_t len, MC_handshake_t* handshake)
 {
-    //next state is just the last byte 
+    //next state is just the last byte for now
     handshake->next_state = buff[len-1]; 
 }
 
@@ -171,17 +209,25 @@ static void send_fake_status(Client_t* client)
 {
     size_t fstat_size = strlen(FAKE_STATUS);
 
-    /* fist store the packed into a buffer, calculate size then send it */
+    /* fist store the packet into a buffer, calculate size then send it */
     char* buffer = malloc(fstat_size + 6); 
     if (!buffer)
     {
         perror("malloc"); 
         disconnect_client(client, "unable to allocate memory"); 
     }
-    buffer[0] = '\0';
-    size_t i = pack_varint((uint8_t*)buffer+1, 4, fstat_size); 
-    memcpy(buffer+1+i, FAKE_STATUS, fstat_size); 
-    send_varint(client, fstat_size+1+i); 
+    buffer[0] = STATUS_S2C_STATUS_RESPONSE;                         /* packet id */ 
+    ssize_t i = pack_varint((uint8_t*)&buffer[1], 4, fstat_size);   /* response size */
+    if (i == -1)
+    {
+        free(buffer); 
+        disconnect_client(client, "unable to pack varint"); 
+    }
+    memcpy(&buffer[i+1], FAKE_STATUS, fstat_size);                  /* response */ 
+
+    /* sending size of the packet */ 
+    send_size_prefix(client, fstat_size+1+i); 
+    
     send_n_bytes(client, buffer, fstat_size+1+i); 
     free(buffer); 
 }
@@ -196,35 +242,59 @@ void handle_client_status(Client_t* client)
         disconnect_client(client, "invalid status packet prefix size"); 
     }
     uint8_t packet_id = recv_byte(client); 
-    if (packet_id != 0)
+    if (packet_id != STATUS_C2S_STATUS_REQUEST)
     {
-        printf("invalid status packet id \n"); 
-        disconnect_client(client, "invalid status packed id"); 
+        disconnect_client(client, "invalid status packet id"); 
     }
     send_fake_status(client); 
 
-    //recv ping 
+    /* recv ping */ 
     size_prefix = recv_size_prefix(client); 
     if (size_prefix != PING_PACKET_SIZE)
     {
-        printf("invalid ping packet size\n"); 
-        disconnect_client(client, "invalid ping packed size"); 
+        disconnect_client(client, "invalid ping packet size"); 
     }
 
     packet_id = recv_byte(client); 
-    if (packet_id != 0x01)
+    if (packet_id != STATUS_C2S_PING)
     {
-        printf("invalid ping packet id\n"); 
-        disconnect_client(client, "invalid ping packed id"); 
+        disconnect_client(client, "invalid ping packet id"); 
     }
-    char payload[8]; 
-    recv_n_bytes(client, payload, 8); 
+    char payload[PING_PACKET_SIZE - 1]; 
+    recv_n_bytes(client, payload, PING_PACKET_SIZE - 1); 
     
-    //send pong
-    send_varint(client, 9); 
-    send_byte(client, 0x01); 
-    send_n_bytes(client, payload, 8); 
+    /* send pong */ 
+    send_size_prefix(client, PING_PACKET_SIZE);         /* packet size */
+    send_byte(client, STATUS_S2C_PONG);                 /* packet id   */ 
+    send_n_bytes(client, payload, PING_PACKET_SIZE-1);  /* payload     */ 
     disconnect_client(client, "finishied status connection"); 
+}
+
+void handle_client_login(Client_t* client)
+{
+    /* login start */ 
+    uint8_t buffer[BUFFER_SIZE]; 
+    uint32_t size_prefix = recv_packet(client, buffer, sizeof buffer); 
+    (void)size_prefix; 
+    if (buffer[0] != LOGIN_C2S_START)
+    {
+        disconnect_client(client, "invalid login start id"); 
+    }
+    uint32_t string_size; 
+    ssize_t i = parse_varint(&buffer[1], size_prefix - 1, &string_size); 
+    if (i == -1)
+    {
+        disconnect_client(client, "bad name string size"); 
+    }
+    if (i+1+string_size >= size_prefix || string_size+1 >= sizeof client->player_name)
+    {
+        disconnect_client(client, "very long player name"); 
+    }
+    memcpy(client->player_name, &buffer[1+i], string_size); 
+    client->player_name[string_size] = '\0'; 
+    printf("%s: A player trying to login : %s\n", client->ip, client->player_name); 
+    logger_handle_event(LOG_LOGIN, client->ip, client->player_name); 
+    disconnect_client(client, "not fully implemented login state"); 
 }
 
 void* handle_client(void* arg)
@@ -233,7 +303,7 @@ void* handle_client(void* arg)
     free(arg); 
 
     printf("Connection from ip : %s\n", client.ip); 
-    logger_handle_event(LOG_CONNECT, client.ip); 
+    logger_handle_event(LOG_CONNECT, client.ip, NULL); 
 
     while(1)
     {
@@ -244,8 +314,11 @@ void* handle_client(void* arg)
                 break; 
             case STATE_STATUS: 
                 printf("%s requested status\n", client.ip); 
-                logger_handle_event(LOG_FETCH_STATUS, client.ip); 
+                logger_handle_event(LOG_FETCH_STATUS, client.ip, NULL); 
                 handle_client_status(&client); 
+                break; 
+            case STATE_LOGIN:
+                handle_client_login(&client); 
                 break; 
             default: 
                 disconnect_client(&client, "not implemented connection state"); 

@@ -22,7 +22,7 @@
 #define CLIENT_TIMEOUT_SEC 10
 #define FAKE_STATUE_FILE_PATH "fake_status"
 #define BUFFER_SIZE 1024  /*size prefix is only 1 byte so we can assume that the maximum size is 256*/
-#define FAKE_STATUS "{\"version\":{\"name\":\"1.21.5\",\"protocol\":770},\"enforcesSecureChat\":true,\"description\":\"A Minecraft Server\",\"players\":{\"max\":69,\"online\":0}}"
+#define FAKE_STATUS "{\"version\":{\"name\":\"1.21.5\",\"protocol\":770},\"enforcesSecureChat\":false,\"description\":\"A Minecraft Server\",\"players\":{\"max\":69,\"online\":0}}"
 #define LOG_FILE_PATH "./log.txt"
 
 
