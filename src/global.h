@@ -11,6 +11,7 @@
 #include <string.h> 
 #include <stdlib.h> 
 #include <stdio.h> 
+#include <stdarg.h> 
 #include <pthread.h> 
 #include <time.h> 
 #include <sys/time.h> 
@@ -23,6 +24,7 @@
 #define FAKE_STATUE_FILE_PATH "fake_status"
 #define BUFFER_SIZE 1024
 #define FAKE_STATUS "{\"version\":{\"name\":\"1.21.5\",\"protocol\":770},\"enforcesSecureChat\":false,\"description\":\"A Minecraft Server\",\"players\":{\"max\":69,\"online\":0}}"
+#define DISCONNECT_MSG "{\"text\":\"You are not whitelisted on this server!\"}"
 #define LOG_FILE_PATH "./log.txt"
 
 

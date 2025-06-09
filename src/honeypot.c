@@ -43,8 +43,16 @@ FAIL:
     return -1; 
 }
 
-static void disconnect_client(Client_t* client, char* msg)
+static void disconnect_client(Client_t* client, const char* fmt, ...)
 {
+    char msg[256]; 
+    va_list args; 
+    va_start(args, fmt); 
+
+    vsnprintf(msg, sizeof msg, fmt, args); 
+
+    va_end(args); 
+
     printf("%s Disconnected: %s\n", client->ip, msg); 
     logger_handle_event(LOG_DISCONNECT, client->ip, msg); 
     if (client->fd >= 0)
@@ -60,7 +68,17 @@ static uint8_t recv_byte(Client_t* client)
     uint8_t res; 
     if (recv(client->fd, &res, 1, MSG_WAITALL) != 1)
     {
-        disconnect_client(client, "invalid recv packet length"); 
+        disconnect_client(client, "recv_byte: failed to receive expected 1 byte"); 
+    }
+    return res; 
+}
+
+static uint8_t peek_byte(Client_t* client)
+{
+    uint8_t res; 
+    if (recv(client->fd, &res, 1, MSG_PEEK) != 1)
+    {
+        disconnect_client(client, "peek_byte: failed to peek 1 byte"); 
     }
     return res; 
 }
@@ -81,7 +99,7 @@ static uint32_t recv_varint(Client_t* client)
         position += 7; 
         if (position >= 32)
         {
-            disconnect_client(client, "varint too big"); 
+            disconnect_client(client, "recv_varint: variable-length integer exceeds 32 bits"); 
         }
     }
     return result; 
@@ -92,7 +110,7 @@ static void recv_n_bytes(Client_t* client, void* buff, ssize_t len)
 {
     if (recv(client->fd, buff, len, MSG_WAITALL) != len) 
     {
-        disconnect_client(client, "invalid recv packet length"); 
+        disconnect_client(client, "recv_n_bytes: failed to receive expected %ld bytes", len); 
     }
 }
 
@@ -102,7 +120,7 @@ static uint32_t recv_packet(Client_t* client, void* buff, ssize_t len)
     uint32_t size_prefix = recv_size_prefix(client); 
     if (size_prefix >= len || size_prefix == 0)
     {
-        disconnect_client(client, "invalid size prefix"); 
+        disconnect_client(client, "recv_packet: size prefix is zero or exceeds buffer limit"); 
     }
         
     recv_n_bytes(client, buff, size_prefix); 
@@ -133,6 +151,7 @@ static void send_varint(Client_t* client, uint32_t val)
     }
 }
 #define send_size_prefix send_varint
+
 
 /* returns how many bytes are written into the buffer or -1 if it can't */
 static ssize_t pack_varint(uint8_t* target, size_t len, uint32_t val)
@@ -176,6 +195,35 @@ static ssize_t parse_varint(uint8_t* buff, size_t len, uint32_t* target_val)
     return -1; 
 }
 
+/* send packet that only contains a str */ 
+static void send_str_packet(Client_t* client, int packet_id, char* str)
+{
+    size_t str_size = strlen(str);
+
+    /* fist store the packet into a buffer, calculate size then send it */
+    char* buffer = malloc(str_size + 6); 
+    if (!buffer)
+    {
+        perror("malloc"); 
+        disconnect_client(client, "malloc: unable to allocate memory"); 
+    }
+    buffer[0] = packet_id;                                          /* packet id */ 
+    ssize_t i = pack_varint((uint8_t*)&buffer[1], 4, str_size);     /* str size */
+    if (i == -1)
+    {
+        free(buffer); 
+        disconnect_client(client, "pack_varint: unable to pack varint"); 
+    }
+    memcpy(&buffer[i+1], str, str_size);                    /* str */ 
+
+    /* sending size of the packet */ 
+    send_size_prefix(client, str_size+1+i); 
+    
+    /* sending the packet */ 
+    send_n_bytes(client, buffer, str_size+1+i); 
+    free(buffer); 
+}
+
 static void parse_handshake(uint8_t* buff, size_t len, MC_handshake_t* handshake)
 {
     //next state is just the last byte for now
@@ -186,51 +234,23 @@ static void parse_handshake(uint8_t* buff, size_t len, MC_handshake_t* handshake
 
 void handle_client_handshake(Client_t* client)
 {
+    uint8_t first_byte = peek_byte(client); 
+
+    if (first_byte == LEGACY_PING_ID)
+    {
+        disconnect_client(client, "handshake: received legacy ping (0xFE), not supported"); 
+    }
+
     uint8_t handshake_buffer[BUFFER_SIZE]; 
     MC_handshake_t handshake; 
 
-    uint32_t size_prefix = recv_size_prefix(client); 
-    if (size_prefix >= sizeof handshake_buffer || size_prefix == 0)
-    {
-        disconnect_client(client, "invalid size prefix"); 
-    }
-
-    if (size_prefix == LEGACY_PING_ID)
-    {
-        disconnect_client(client, "legacy ping is not implemented"); 
-    }
-    recv_n_bytes(client, handshake_buffer, size_prefix); 
+    uint32_t size_prefix = recv_packet(client, handshake_buffer, sizeof handshake_buffer); 
     parse_handshake(handshake_buffer, size_prefix, &handshake); 
 
     client->con_state = handshake.next_state; 
 }
 
-static void send_fake_status(Client_t* client)
-{
-    size_t fstat_size = strlen(FAKE_STATUS);
-
-    /* fist store the packet into a buffer, calculate size then send it */
-    char* buffer = malloc(fstat_size + 6); 
-    if (!buffer)
-    {
-        perror("malloc"); 
-        disconnect_client(client, "unable to allocate memory"); 
-    }
-    buffer[0] = STATUS_S2C_STATUS_RESPONSE;                         /* packet id */ 
-    ssize_t i = pack_varint((uint8_t*)&buffer[1], 4, fstat_size);   /* response size */
-    if (i == -1)
-    {
-        free(buffer); 
-        disconnect_client(client, "unable to pack varint"); 
-    }
-    memcpy(&buffer[i+1], FAKE_STATUS, fstat_size);                  /* response */ 
-
-    /* sending size of the packet */ 
-    send_size_prefix(client, fstat_size+1+i); 
-    
-    send_n_bytes(client, buffer, fstat_size+1+i); 
-    free(buffer); 
-}
+#define send_fake_status(clinet) send_str_packet((client), STATUS_S2C_STATUS_RESPONSE, FAKE_STATUS)
 
 #define PING_PACKET_SIZE 9
 
@@ -239,12 +259,12 @@ void handle_client_status(Client_t* client)
     uint32_t size_prefix = recv_size_prefix(client); 
     if (size_prefix != 1)
     {
-        disconnect_client(client, "invalid status packet prefix size"); 
+        disconnect_client(client, "status: expected 1-byte packet prefix"); 
     }
     uint8_t packet_id = recv_byte(client); 
     if (packet_id != STATUS_C2S_STATUS_REQUEST)
     {
-        disconnect_client(client, "invalid status packet id"); 
+        disconnect_client(client, "status: expected status packet id"); 
     }
     send_fake_status(client); 
 
@@ -252,13 +272,13 @@ void handle_client_status(Client_t* client)
     size_prefix = recv_size_prefix(client); 
     if (size_prefix != PING_PACKET_SIZE)
     {
-        disconnect_client(client, "invalid ping packet size"); 
+        disconnect_client(client, "ping: expected ping packet size of 9 bytes"); 
     }
 
     packet_id = recv_byte(client); 
     if (packet_id != STATUS_C2S_PING)
     {
-        disconnect_client(client, "invalid ping packet id"); 
+        disconnect_client(client, "ping: expected packet packet id"); 
     }
     char payload[PING_PACKET_SIZE - 1]; 
     recv_n_bytes(client, payload, PING_PACKET_SIZE - 1); 
@@ -267,34 +287,42 @@ void handle_client_status(Client_t* client)
     send_size_prefix(client, PING_PACKET_SIZE);         /* packet size */
     send_byte(client, STATUS_S2C_PONG);                 /* packet id   */ 
     send_n_bytes(client, payload, PING_PACKET_SIZE-1);  /* payload     */ 
-    disconnect_client(client, "finishied status connection"); 
+    disconnect_client(client, "status: completed ping/pong exchange, closing connection"); 
 }
+
+#define send_disconnect_player(clinet) send_str_packet((client), LOGIN_S2C_DISCONNECT, DISCONNECT_MSG)
 
 void handle_client_login(Client_t* client)
 {
     /* login start */ 
     uint8_t buffer[BUFFER_SIZE]; 
     uint32_t size_prefix = recv_packet(client, buffer, sizeof buffer); 
-    (void)size_prefix; 
     if (buffer[0] != LOGIN_C2S_START)
     {
-        disconnect_client(client, "invalid login start id"); 
+        disconnect_client(client, "login: expected login start packet id"); 
     }
     uint32_t string_size; 
     ssize_t i = parse_varint(&buffer[1], size_prefix - 1, &string_size); 
     if (i == -1)
     {
-        disconnect_client(client, "bad name string size"); 
+        disconnect_client(client, "login: failed to parse username length (varint)"); 
     }
     if (i+1+string_size >= size_prefix || string_size+1 >= sizeof client->player_name)
     {
-        disconnect_client(client, "very long player name"); 
+        disconnect_client(client, "login: username exceeds buffer limits or malformed"); 
     }
     memcpy(client->player_name, &buffer[1+i], string_size); 
     client->player_name[string_size] = '\0'; 
     printf("%s: A player trying to login : %s\n", client->ip, client->player_name); 
-    logger_handle_event(LOG_LOGIN, client->ip, client->player_name); 
-    disconnect_client(client, "not fully implemented login state"); 
+
+    char log_msg[256]; 
+    snprintf(log_msg, sizeof log_msg, "Username: %s", client->player_name); 
+
+    logger_handle_event(LOG_LOGIN, client->ip, log_msg); 
+
+    /* disconnect player */ 
+    send_disconnect_player(client); 
+    disconnect_client(client, "yet to be implemented"); 
 }
 
 void* handle_client(void* arg)
@@ -321,7 +349,7 @@ void* handle_client(void* arg)
                 handle_client_login(&client); 
                 break; 
             default: 
-                disconnect_client(&client, "not implemented connection state"); 
+                disconnect_client(&client, "connection state handler: unknown or unsupported state"); 
                 return NULL; 
         }
     }

@@ -14,7 +14,7 @@ void logger_init(void)
     }
 }
 
-void logger_handle_event(Log_event_t event, char* ip, char* optional_msg)
+void logger_handle_event(Log_event_t event, const char* ip, const char* optional_msg)
 {
     char* log_msg; 
     switch(event)
@@ -40,9 +40,9 @@ void logger_handle_event(Log_event_t event, char* ip, char* optional_msg)
     time(&tm);
     pthread_mutex_lock(&log_mutex);
     if (optional_msg == NULL)
-        fprintf(log_file, "%s: %s on %s",ip, log_msg, ctime(&tm)); 
+        fprintf(log_file, "[%s] %s on %s",ip, log_msg, ctime(&tm)); 
     else
-        fprintf(log_file, "%s: %s (%s) on %s",ip, log_msg, optional_msg, ctime(&tm)); 
+        fprintf(log_file, "[%s] %s (%s) on %s",ip, log_msg, optional_msg, ctime(&tm)); 
     fflush(log_file); 
     pthread_mutex_unlock(&log_mutex);
 }

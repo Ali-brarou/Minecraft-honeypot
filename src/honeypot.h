@@ -23,6 +23,7 @@ typedef enum Status_packet_id_e {
 
 typedef enum Login_packet_id_e {
     LOGIN_C2S_START             = 0x00, 
+    LOGIN_S2C_DISCONNECT        = 0x00, 
     LOGIN_S2C_SUCCESS, 
 } Login_packet_id_s; 
 
