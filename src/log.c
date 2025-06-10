@@ -40,9 +40,19 @@ void logger_handle_event(Log_event_t event, const char* ip, const char* optional
     time(&tm);
     pthread_mutex_lock(&log_mutex);
     if (optional_msg == NULL)
+    {
         fprintf(log_file, "[%s] %s on %s",ip, log_msg, ctime(&tm)); 
+#if VERBOSE
+        printf("[%s] %s on %s",ip, log_msg, ctime(&tm)); 
+#endif
+    }
     else
+    {
         fprintf(log_file, "[%s] %s (%s) on %s",ip, log_msg, optional_msg, ctime(&tm)); 
+#if VERBOSE
+        printf("[%s] %s (%s) on %s",ip, log_msg, optional_msg, ctime(&tm)); 
+#endif
+    }
     fflush(log_file); 
     pthread_mutex_unlock(&log_mutex);
 }

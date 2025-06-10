@@ -53,13 +53,13 @@ static void disconnect_client(Client_t* client, const char* fmt, ...)
 
     va_end(args); 
 
-    printf("%s Disconnected: %s\n", client->ip, msg); 
     logger_handle_event(LOG_DISCONNECT, client->ip, msg); 
     if (client->fd >= 0)
     {
         close(client->fd); 
     }
     client->fd = -1; 
+    atomic_fetch_sub(&current_clients, 1);
     pthread_exit(NULL); 
 }
 
@@ -230,6 +230,12 @@ static void parse_handshake(uint8_t* buff, size_t len, MC_handshake_t* handshake
     handshake->next_state = buff[len-1]; 
 }
 
+static void handle_legacy_ping(Client_t* client)
+{
+    send_n_bytes(client, LEGACY_PING_RESP, LEGACY_PING_RESP_LEN); 
+    disconnect_client(client, "ping: completed legacy ping"); 
+}
+
 #define LEGACY_PING_ID 0xFE
 
 void handle_client_handshake(Client_t* client)
@@ -238,7 +244,8 @@ void handle_client_handshake(Client_t* client)
 
     if (first_byte == LEGACY_PING_ID)
     {
-        disconnect_client(client, "handshake: received legacy ping (0xFE), not supported"); 
+        handle_legacy_ping(client); 
+        //disconnect_client(client, "handshake: received legacy ping (0xFE), not supported"); 
     }
 
     uint8_t handshake_buffer[BUFFER_SIZE]; 
@@ -287,7 +294,7 @@ void handle_client_status(Client_t* client)
     send_size_prefix(client, PING_PACKET_SIZE);         /* packet size */
     send_byte(client, STATUS_S2C_PONG);                 /* packet id   */ 
     send_n_bytes(client, payload, PING_PACKET_SIZE-1);  /* payload     */ 
-    disconnect_client(client, "status: completed ping/pong exchange, closing connection"); 
+    disconnect_client(client, "status: completed ping/pong exchange"); 
 }
 
 #define send_disconnect_player(clinet) send_str_packet((client), LOGIN_S2C_DISCONNECT, DISCONNECT_MSG)
@@ -313,7 +320,6 @@ void handle_client_login(Client_t* client)
     }
     memcpy(client->player_name, &buffer[1+i], string_size); 
     client->player_name[string_size] = '\0'; 
-    printf("%s: A player trying to login : %s\n", client->ip, client->player_name); 
 
     char log_msg[256]; 
     snprintf(log_msg, sizeof log_msg, "Username: %s", client->player_name); 
@@ -322,16 +328,13 @@ void handle_client_login(Client_t* client)
 
     /* disconnect player */ 
     send_disconnect_player(client); 
-    disconnect_client(client, "yet to be implemented"); 
+    disconnect_client(client, "login: sent disconnect packet"); 
 }
 
 void* handle_client(void* arg)
 {
     Client_t client = *(Client_t*)arg; 
     free(arg); 
-
-    printf("Connection from ip : %s\n", client.ip); 
-    logger_handle_event(LOG_CONNECT, client.ip, NULL); 
 
     while(1)
     {
@@ -341,7 +344,6 @@ void* handle_client(void* arg)
                 handle_client_handshake(&client); 
                 break; 
             case STATE_STATUS: 
-                printf("%s requested status\n", client.ip); 
                 logger_handle_event(LOG_FETCH_STATUS, client.ip, NULL); 
                 handle_client_status(&client); 
                 break; 

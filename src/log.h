@@ -11,7 +11,7 @@ typedef enum Log_event_e {
 } Log_event_t; 
 
 void logger_init(void); 
-/* if there is no optional msg put NULL */  
+/* if there is no optional msg pass NULL */  
 void logger_handle_event(Log_event_t event, const char* ip, const char* optional_msg); 
 void logger_close(void); 
 

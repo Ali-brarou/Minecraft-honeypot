@@ -1,8 +1,7 @@
 # Minecraft Honeypot
 
-A lightweight C-based Minecraft honeypot designed to detect and log status ping requests and login attempts from annoying scanners and bots. 
+A lightweight C-based Minecraft honeypot designed to detect and log status ping requests and login attempts from scanners and bots. 
 This tool implements the basic Minecraft handshake and status protocol, responding with a fake server status and logging client information. 
-Still working on implementing login status
 
 For security reasons, Please avoid running this as a privileged or personel user.
 Instead, it's better to use a container or create new non-privileged user

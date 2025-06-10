@@ -1,6 +1,7 @@
 #include "server.h"
 
 volatile sig_atomic_t server_running = 1;
+atomic_int current_clients = 0;
 
 void server_handle_sigint(int sig)
 {
@@ -142,6 +143,18 @@ void accept_loop(int listen_fd)
             close(client_fd); 
             continue; 
         }
+
+        //log connection
+        logger_handle_event(LOG_CONNECT, client->ip, NULL);
+
+        if (atomic_fetch_add(&current_clients, 1) >= MAX_CLIENTS) {
+            atomic_fetch_sub(&current_clients, 1);
+            fprintf(stderr, "Too many clients. Rejecting connection.\n");
+            logger_handle_event(LOG_DISCONNECT, client->ip, "Too many clients");
+            close(client_fd);
+            continue;
+        }
+
 
         pthread_attr_t attr;
         pthread_attr_init(&attr);

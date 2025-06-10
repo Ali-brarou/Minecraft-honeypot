@@ -3,6 +3,7 @@
 
 #include "global.h"
 #include "honeypot.h"
+#include "log.h"
 
 int setup_server(void); 
 void accept_loop(int listen_fd); 

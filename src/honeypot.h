@@ -9,7 +9,6 @@ typedef enum MC_state_e {
     STATE_HANDSHAKE             = 0, 
     STATE_STATUS,          
     STATE_LOGIN, 
-    STATE_TRANSFER, 
 } MC_state_t; 
 
 /* https://minecraft.wiki/w/Java_Edition_protocol/Server_List_Ping */
