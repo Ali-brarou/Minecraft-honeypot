@@ -12,6 +12,26 @@ void logger_init(void)
         perror("fopen"); 
         exit(1); 
     }
+
+    struct stat st = {0}; 
+    if (stat(LOG_DIR_PATH, &st) == -1)
+    {
+        
+        printf("Creating payload logs dir : %s\n", LOG_DIR_PATH); 
+        if (mkdir(LOG_DIR_PATH, 0700) == -1)
+        {
+            perror("mkdir"); 
+            exit(1); 
+        }
+    }
+    else 
+    {
+        if (!S_ISDIR(st.st_mode))
+        {
+            fprintf(stderr, "Error: %s is not a directory\n", LOG_DIR_PATH); 
+            exit(1); 
+        }
+    }
 }
 
 void logger_handle_event(Log_event_t event, const char* ip, const char* optional_msg)
@@ -54,6 +74,24 @@ void logger_handle_event(Log_event_t event, const char* ip, const char* optional
 #endif
     }
     fflush(log_file); 
+    pthread_mutex_unlock(&log_mutex);
+}
+
+void logger_save_payload(const char* ip, const char* phase, const uint8_t* payload, size_t len)
+{
+    pthread_mutex_lock(&log_mutex);
+    char filename[512]; 
+    time_t now = time(NULL); 
+    snprintf(filename, sizeof filename, "%s/%s_%s_%ld.bin", LOG_DIR_PATH, ip, phase, now); 
+    FILE* payload_file = fopen(filename, "wb"); 
+    if (payload_file)
+    {
+        fwrite(payload, 1, len, payload_file); 
+        fclose(payload_file); 
+#if VERBOSE 
+    printf("Saved payload from %s (%s) to %s\n", ip, phase, filename);
+#endif 
+    }
     pthread_mutex_unlock(&log_mutex);
 }
 

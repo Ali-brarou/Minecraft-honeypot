@@ -252,6 +252,9 @@ void handle_client_handshake(Client_t* client)
     MC_handshake_t handshake; 
 
     uint32_t size_prefix = recv_packet(client, handshake_buffer, sizeof handshake_buffer); 
+    /* save raw handshake payload */ 
+    logger_save_payload(client->ip, "handshake", handshake_buffer, size_prefix);
+
     parse_handshake(handshake_buffer, size_prefix, &handshake); 
 
     client->con_state = handshake.next_state; 
@@ -269,6 +272,7 @@ void handle_client_status(Client_t* client)
         disconnect_client(client, "status: expected 1-byte packet prefix"); 
     }
     uint8_t packet_id = recv_byte(client); 
+    logger_save_payload(client->ip, "status_request", &packet_id, 1);
     if (packet_id != STATUS_C2S_STATUS_REQUEST)
     {
         disconnect_client(client, "status: expected status packet id"); 
@@ -289,6 +293,7 @@ void handle_client_status(Client_t* client)
     }
     char payload[PING_PACKET_SIZE - 1]; 
     recv_n_bytes(client, payload, PING_PACKET_SIZE - 1); 
+    logger_save_payload(client->ip, "ping_payload", (uint8_t*)payload, PING_PACKET_SIZE - 1);
     
     /* send pong */ 
     send_size_prefix(client, PING_PACKET_SIZE);         /* packet size */
@@ -304,6 +309,7 @@ void handle_client_login(Client_t* client)
     /* login start */ 
     uint8_t buffer[BUFFER_SIZE]; 
     uint32_t size_prefix = recv_packet(client, buffer, sizeof buffer); 
+    logger_save_payload(client->ip, "login_start", buffer, size_prefix);
     if (buffer[0] != LOGIN_C2S_START)
     {
         disconnect_client(client, "login: expected login start packet id"); 
