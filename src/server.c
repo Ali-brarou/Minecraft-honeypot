@@ -54,7 +54,7 @@ int setup_server(void)
             goto fail; 
         }
 
-        if (bind(listen_fd, res->ai_addr, res->ai_addrlen) == -1)
+        if (bind(listen_fd, p->ai_addr, p->ai_addrlen) == -1)
         {
             perror("bind"); 
             goto fail; 
